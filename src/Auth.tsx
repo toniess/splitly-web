@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { api, tokens } from './api'
+import { api, tokens } from './client'
+import { setDemoMode } from './client'
 import { ErrorBox, Field, useAction } from './ui'
 
 export function Auth({ onDone }: { onDone: () => void }) {
@@ -61,6 +62,20 @@ export function Auth({ onDone }: { onDone: () => void }) {
 
         <button type="submit" disabled={busy} style={{ width: '100%', marginTop: 8 }}>
           {busy ? '…' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+        </button>
+
+        <div className="divider"><span>или</span></div>
+
+        <button
+          type="button"
+          className="ghost"
+          style={{ width: '100%' }}
+          onClick={() => {
+            setDemoMode(true)
+            onDone()
+          }}
+        >
+          Посмотреть демо без регистрации
         </button>
 
         <p className="muted" style={{ textAlign: 'center', marginBottom: 0 }}>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, type GroupSummary } from './api'
+import { api } from './client'
+import { type GroupSummary } from './api'
 import { ErrorBox, Field, useAction } from './ui'
 
 export function Groups({ onOpen }: { onOpen: (id: string) => void }) {

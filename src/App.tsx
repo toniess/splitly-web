@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, tokens, type User } from './api'
+import { api, tokens, isDemoMode, setDemoMode } from './client'
+import { type User } from './api'
 import { Auth } from './Auth'
 import { Groups } from './Groups'
 import { GroupDetail } from './GroupDetail'
@@ -46,6 +47,13 @@ export function App() {
 
   return (
     <div className="app">
+      {isDemoMode() && (
+        <div className="demo-bar">
+          Демо-режим: данные живут в этой вкладке и исчезнут при перезагрузке.
+          Сервер не используется.
+        </div>
+      )}
+
       <header className="top">
         <h1>Splitly</h1>
         <div className="row">
@@ -53,12 +61,13 @@ export function App() {
           <button
             className="link"
             onClick={() => {
+              setDemoMode(false)
               tokens.clear()
               setMe(null)
               setOpenGroup(null)
             }}
           >
-            выйти
+            {isDemoMode() ? 'выйти из демо' : 'выйти'}
           </button>
         </div>
       </header>

@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import {
-  api,
-  type Balance,
-  type ExpenseSummary,
-  type Group,
-  type GroupMember,
-  type SplitType,
-  type Transfer,
-} from './api'
+import { api } from './client'
+import { type Balance, type ExpenseSummary, type Group, type GroupMember, type SplitType, type Transfer } from './api'
 import { ErrorBox, Field, Money, formatDate, useAction } from './ui'
 
 type Tab = 'expenses' | 'balances' | 'settle'
