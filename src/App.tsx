@@ -11,9 +11,12 @@ export function App() {
   const [openGroup, setOpenGroup] = useState<string | null>(null)
 
   // Токен может лежать в localStorage с прошлого визита — проверяем,
-  // жив ли он, одним запросом к /users/me
+  // жив ли он, одним запросом к /users/me.
+  //
+  // В демо-режиме токена нет и не должно быть: песочница отвечает сама.
+  // Без этой оговорки демо молча возвращало на экран входа.
   const identify = async () => {
-    if (!tokens.access) {
+    if (!isDemoMode() && !tokens.access) {
       setChecked(true)
       return
     }

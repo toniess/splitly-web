@@ -1,7 +1,7 @@
 // Клиент Splitly API. Типы повторяют record-ы бэкенда: если там что-то
 // переименуют, расхождение вылезет здесь при сборке, а не в рантайме.
 
-const BASE = import.meta.env.VITE_API_BASE ?? 'https://splitly.containerapps.ru'
+const BASE = import.meta.env?.VITE_API_BASE ?? 'https://splitly.containerapps.ru'
 
 // ---------- типы ответов ----------
 
