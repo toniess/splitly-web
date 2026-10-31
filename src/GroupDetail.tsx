@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './client'
 import { type Balance, type ExpenseSummary, type Group, type GroupMember, type SplitType, type Transfer } from './api'
 import { ErrorBox, Field, Money, formatDate, useAction } from './ui'
@@ -185,6 +185,11 @@ function ExpenseForm({
     setChosen(next)
   }
 
+  // Повтор после обрыва связи должен уйти с тем же ключом и тем же телом:
+  // тогда сервер узнает повтор и не создаст вторую трату. Поэтому ключ и момент
+  // траты живут до успешного ответа, а новые заводятся, только если форму изменили.
+  const pending = useRef<{ fingerprint: string; key: string; spentAt: string } | null>(null)
+
   const { run, busy, error } = useAction(async () => {
     const participants = members
       .filter((m) => chosen.has(m.userId))
@@ -194,16 +199,24 @@ function ExpenseForm({
         value: splitType === 'EQUAL' ? null : (values[m.userId] ?? '').trim() || '0',
       }))
 
-    await api.createExpense(groupId, {
-      description,
-      amount,
-      payerId,
-      // Полночь выбранного дня по UTC может оказаться в будущем, а сервер
-      // такие траты отклоняет. Для сегодняшней даты шлём текущий момент.
-      spentAt: date === today ? new Date().toISOString() : new Date(date).toISOString(),
-      splitType,
-      participants,
-    })
+    const fingerprint = JSON.stringify([description, amount, payerId, date, splitType, participants])
+    if (pending.current?.fingerprint !== fingerprint) {
+      pending.current = {
+        fingerprint,
+        key: crypto.randomUUID(),
+        // Полночь выбранного дня по UTC может оказаться в будущем, а сервер
+        // такие траты отклоняет. Для сегодняшней даты шлём текущий момент.
+        spentAt: date === today ? new Date().toISOString() : new Date(date).toISOString(),
+      }
+    }
+    const { key, spentAt } = pending.current
+
+    await api.createExpense(
+      groupId,
+      { description, amount, payerId, spentAt, splitType, participants },
+      key,
+    )
+    pending.current = null
     onDone()
   })
 
@@ -354,8 +367,17 @@ function Settle({
 
   }, [groupId])
 
+  // Ключ перевода живёт до успеха, как у формы траты: повторное нажатие после
+  // обрыва связи не должно записать перевод дважды.
+  const keys = useRef(new Map<string, string>())
+
   const settle = useAction(async (t: Transfer) => {
-    await api.settle(groupId, t.from, t.to, t.amount)
+    const fingerprint = `${t.from}>${t.to}:${t.amount}`
+    const key = keys.current.get(fingerprint) ?? crypto.randomUUID()
+    keys.current.set(fingerprint, key)
+
+    await api.settle(groupId, t.from, t.to, t.amount, key)
+    keys.current.delete(fingerprint)
     await load.run()
   })
 

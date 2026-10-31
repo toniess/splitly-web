@@ -10,16 +10,17 @@
 // копейке участникам в порядке userId, жадный план переводов. Это осознанное
 // дублирование ради автономности демо — настоящие деньги считает сервер.
 
-import type {
-  Balance,
-  Expense,
-  ExpenseFeedPage,
-  Group,
-  GroupMember,
-  GroupSummary,
-  SplitType,
-  Transfer,
-  User,
+import {
+  ApiError,
+  type Balance,
+  type Expense,
+  type ExpenseFeedPage,
+  type Group,
+  type GroupMember,
+  type GroupSummary,
+  type SplitType,
+  type Transfer,
+  type User,
 } from './api'
 
 const ME = '00000000-0000-0000-0000-00000000000a'
@@ -64,31 +65,50 @@ function splitEqual(amountCents: number, userIds: string[]): Map<string, number>
   return result
 }
 
+/** Отказ с тем же статусом и заголовком, что у сервера на нарушение правил деления. */
+const invalid = (detail: string) => new ApiError(422, 'Нарушение бизнес-правила', detail)
+
 function splitByValues(
   amountCents: number,
   participants: { userId: string; value: string | null }[],
   splitType: SplitType,
 ): Map<string, number> {
   if (splitType === 'EXACT') {
-    return new Map(participants.map((p) => [p.userId, toCents(p.value ?? '0')]))
+    const result = new Map(participants.map((p) => [p.userId, toCents(p.value ?? '0')]))
+    const sum = [...result.values()].reduce((a, b) => a + b, 0)
+    if (sum !== amountCents) {
+      throw invalid(`Сумма долей ${fromCents(sum)} не равна сумме траты ${fromCents(amountCents)}`)
+    }
+    return result
   }
 
-  // SHARES: делим пропорционально весам, остаток — тем же правилом
-  const weights = participants.map((p) => Math.max(Number(p.value ?? '1') || 0, 0))
-  const total = weights.reduce((a, b) => a + b, 0) || participants.length
+  // SHARES: целые неотрицательные веса, хотя бы один больше нуля — как на сервере
+  const weights = participants.map((p) => Number(p.value ?? ''))
+  if (weights.some((w) => !Number.isInteger(w) || w < 0)) {
+    throw invalid('Доли должны быть целыми числами: 1, 2, 3…')
+  }
+  const total = weights.reduce((a, b) => a + b, 0)
+  if (total === 0) {
+    throw invalid('Хотя бы у одного участника доля должна быть больше нуля')
+  }
 
+  // База — доля, округлённая вниз. BigInt, потому что сумма в копейках, умноженная
+  // на вес, легко выходит за точные целые double.
   const result = new Map<string, number>()
   let given = 0
   participants.forEach((p, i) => {
-    const share = Math.floor((amountCents * (weights[i] || 1)) / total)
+    const share = Number((BigInt(amountCents) * BigInt(weights[i])) / BigInt(total))
     result.set(p.userId, share)
     given += share
   })
 
-  // остаток раздаём по копейке в порядке userId
-  const ordered = [...participants].map((p) => p.userId).sort()
-  let left = amountCents - given
-  for (let i = 0; left > 0; i = (i + 1) % ordered.length, left--) {
+  // Остаток раздаём по копейке в порядке userId, но только участникам с ненулевым весом:
+  // вес 0 значит «не платит», и копейка остатка ему не положена
+  const ordered = participants
+    .filter((_, i) => weights[i] > 0)
+    .map((p) => p.userId)
+    .sort()
+  for (let i = 0, left = amountCents - given; left > 0; i++, left--) {
     result.set(ordered[i], (result.get(ordered[i]) ?? 0) + 1)
   }
   return result
@@ -100,6 +120,8 @@ type StoredExpense = Expense & { sharesCents: Map<string, number>; amountCents: 
 
 let expenses: StoredExpense[] = []
 let settlements: { from: string; to: string; cents: number }[] = []
+/** Ответы на уже обработанные ключи идемпотентности, как в таблице idempotency_keys. */
+let processed = new Map<string, unknown>()
 
 function addExpense(
   description: string,
@@ -146,6 +168,7 @@ function addExpense(
 function seed() {
   expenses = []
   settlements = []
+  processed = new Map()
   addExpense('Отель, две ночи', '1200.00', ME, '2026-10-02T12:00:00Z', 'EQUAL', [
     { userId: ME, value: null },
     { userId: MARIA, value: null },
@@ -253,17 +276,25 @@ export const demoApi = {
       splitType: SplitType
       participants: { userId: string; value: string | null }[]
     },
-  ) =>
-    wait(
-      addExpense(
+    idempotencyKey: string,
+  ): Promise<Expense> => {
+    const done = processed.get(idempotencyKey)
+    if (done) return wait(done as Expense)
+    try {
+      const expense = addExpense(
         body.description,
         body.amount,
         body.payerId,
         body.spentAt,
         body.splitType,
         body.participants,
-      ),
-    ),
+      )
+      processed.set(idempotencyKey, expense)
+      return wait(expense)
+    } catch (e) {
+      return new Promise((_, reject) => setTimeout(() => reject(e), 120))
+    }
+  },
 
   deleteExpense: (id: string) => {
     expenses = expenses.filter((e) => e.id !== id)
@@ -281,8 +312,17 @@ export const demoApi = {
 
   plan: () => wait({ items: plan() }),
 
-  settle: (_groupId: string, fromUserId: string, toUserId: string, amount: string) => {
-    settlements.push({ from: fromUserId, to: toUserId, cents: toCents(amount) })
+  settle: (
+    _groupId: string,
+    fromUserId: string,
+    toUserId: string,
+    amount: string,
+    idempotencyKey: string,
+  ) => {
+    if (!processed.has(idempotencyKey)) {
+      settlements.push({ from: fromUserId, to: toUserId, cents: toCents(amount) })
+      processed.set(idempotencyKey, true)
+    }
     return wait(undefined)
   },
 

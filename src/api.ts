@@ -100,8 +100,12 @@ type Options = {
   method?: string
   body?: unknown
   auth?: boolean
-  /** Защита от повторной отправки: бэкенд требует этот заголовок на создание трат и переводов. */
-  idempotent?: boolean
+  /**
+   * Защита от повторной отправки: бэкенд требует этот заголовок на создание трат и переводов.
+   * Ключ передаёт вызывающий код: повтор той же операции должен уйти с тем же ключом,
+   * иначе сервер не узнает повтор и создаст дубль.
+   */
+  idempotencyKey?: string
 }
 
 let refreshing: Promise<boolean> | null = null
@@ -143,7 +147,7 @@ async function request<T>(path: string, options: Options = {}): Promise<T> {
     if (options.auth !== false && tokens.access) {
       headers['Authorization'] = `Bearer ${tokens.access}`
     }
-    if (options.idempotent) headers['Idempotency-Key'] = crypto.randomUUID()
+    if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey
 
     return fetch(`${BASE}${path}`, {
       method: options.method ?? 'GET',
@@ -230,11 +234,12 @@ export const api = {
       splitType: SplitType
       participants: { userId: string; value: string | null }[]
     },
+    idempotencyKey: string,
   ) =>
     request<Expense>(`/api/v1/groups/${groupId}/expenses`, {
       method: 'POST',
       body,
-      idempotent: true,
+      idempotencyKey,
     }),
 
   deleteExpense: (id: string) => request<void>(`/api/v1/expenses/${id}`, { method: 'DELETE' }),
@@ -245,10 +250,16 @@ export const api = {
   plan: (groupId: string) =>
     request<{ items: Transfer[] }>(`/api/v1/groups/${groupId}/settlement-plan`),
 
-  settle: (groupId: string, fromUserId: string, toUserId: string, amount: string) =>
+  settle: (
+    groupId: string,
+    fromUserId: string,
+    toUserId: string,
+    amount: string,
+    idempotencyKey: string,
+  ) =>
     request(`/api/v1/groups/${groupId}/settlements`, {
       method: 'POST',
       body: { fromUserId, toUserId, amount },
-      idempotent: true,
+      idempotencyKey,
     }),
 }
